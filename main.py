@@ -1,5 +1,6 @@
 import os 
 import re
+from characterai import aiocai
 from collections import deque
 import nextcord
 from nextcord.ui import View, Select
@@ -10,7 +11,18 @@ import random
 from collections import Counter
 from mafic import NodePool, Player, Playlist, Track, TrackEndEvent, SearchType,TrackStartEvent
 from asyncio import Lock
+import logging
+import re
 
+def contains_mention(message, user_id):
+    pattern = f'<@{user_id}>'
+    return bool(re.search(pattern, message))
+
+def remove_mention(message, user_id):
+    pattern = f'<@{user_id}>\s*'
+    return re.sub(pattern, '', message).strip()
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 load_dotenv()
 def is_youtube_url(url):
     # YouTube URL patterns
@@ -20,7 +32,7 @@ def is_youtube_url(url):
     ]
     return any(re.match(pattern, url) for pattern in patterns)
 
-TESTING_GUILD_ID = int(os.getenv("DISCORD_GUILD"))
+TESTING_GUILD_ID = int(os.getenv("DISCORD_TEST_GUILD"))
 
 class MyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
@@ -36,6 +48,10 @@ class MyBot(commands.Bot):
         self.recommendation_enabled = {}
         self.recommendation_history = {}  # New: Store recommendation history for each guild
         self.max_recommendation_history = 100  # Adjust this value as needed
+        self.char_ai_client = aiocai.Client(os.getenv("AI_TOKEN"))
+        self.char_ai_chat = None
+        self.char_ai_chat_id = None
+        self.me = None
     async def add_nodes(self):
         await self.pool.create_node(
             host="127.0.0.1",
@@ -43,13 +59,56 @@ class MyBot(commands.Bot):
             label="MAIN",
             password="youshallnotpass",
         )
+    
 
-bot = MyBot(intents=nextcord.Intents(guilds=True, voice_states=True))
+bot = MyBot(intents=nextcord.Intents(messages=True,guilds=True, voice_states=True,message_content=True))
+char = os.getenv("CHAR_ID")
+client = aiocai.Client(os.getenv("AI_TOKEN"))
 
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
+    bot.me = await bot.char_ai_client.get_me()
+    
+    # Initialize the single chat
+    async with await bot.char_ai_client.connect() as chat:
+        new, answer = await chat.new_chat(char, bot.me.id)
+        bot.char_ai_chat = chat
+        bot.char_ai_chat_id = new.chat_id
+    print("Character AI chat initialized")
 
+@bot.event
+async def on_message(message):
+    user_id = '1293424920096936018'
+    if contains_mention(message.content, user_id):
+        # Extract the actual message content without the mention
+        content = remove_mention(message.content, user_id)
+        
+        # Format the message with the author's name
+        formatted_message = f"{message.author.name}: {content}"
+        print(formatted_message)
+        # Use the single chat to send a message
+        async with bot.char_ai_chat:
+            ai_message = await bot.char_ai_chat.send_message(char, bot.char_ai_chat_id, formatted_message)
+            await message.channel.send(f'{ai_message.text}')
+    
+    
+        
+    # print(f'Message from {message.author}: {message.content}')
+    # if message.author.name == "rail_hail" and message.content=="<@1293424920096936018> 愛妳喔":
+    #     await message.channel.send(content="我好愛你喔.....")
+    # elif message.content == "<@1293424920096936018> 幹你娘":
+    #     await message.channel.send(content="哈哈哈哈哈")
+    # elif message.content == "BIBIDI BABIDI":
+    #     await message.channel.send(content="BOOWA")
+    #     await message.channel.send(content="BIBIDI BABIDI BOOWA YEAH~~~💃💃💃")
+    #     await message.channel.send(content="混絡がっても仕様が無い")
+    #     await message.channel.send(content="ガラスシューズで踊るTONIGHT")
+    # elif message.content == "<@1293424920096936018> 愛妳喔":
+    #     await message.channel.send(content="兄弟你是給")
+    
+
+    
 
 
 @bot.listen("on_track_start")
